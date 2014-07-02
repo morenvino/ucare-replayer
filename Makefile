@@ -1,14 +1,22 @@
 # morenvino@uchicago.edu
 
-# Build options
-CC      = gcc
-CFLAGS  = -Wall
-LDFLAGS = 
-
 # Workspace
-SOURCES = $(wildcard *.c)
-OBJECTS = $(notdir $(SOURCES:.c=.o))
+CSOURCES   = $(wildcard *.c)
+COBJECTS   = $(notdir $(CSOURCES:.c=.c.o))
+
+CXXSOURCES = $(wildcard *.cpp)
+CXXOBJECTS = $(notdir $(CXXSOURCES:.cpp=.cpp.o))
+
 EXEC1   = directio.out
+
+# Build options
+CC        = gcc
+CFLAGS    = -pthread -Wall
+
+CXX       = g++
+CXXFLAGS  = -std=c++11 -pthread -Wall
+
+LDFLAGS   = -pthread -Wl,--no-as-needed -lpthread
 
 # Default
 all: build test
@@ -17,17 +25,22 @@ all: build test
 build: $(EXEC1)
 
 # Exec
-$(EXEC1): $(OBJECTS) 
-	$(CC) $(LDFLAGS) $^ -o $@
+$(EXEC1): $(COBJECTS) $(CXXOBJECTS)
+	$(CXX) $(LDFLAGS) $^ -o $@
+#$(CC)  $(LDFLAGS) $^ -o $@
 
 # Dependencies
-#-include $(OBJECTS:.o=.d)
+-include $(COBJECTS:.c.o=.d)
+-include $(CXXOBJECTS:.cpp.o=.d)
 
 # Generate .object and .dep
-%.o: %.c
+%.c.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC)  -MM  $< > $*.d
 
-#$(CC) -MM $(CFLAGS) $< > $*.d
+%.cpp.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) -MM $< > $*.d
 
 # Clean
 clean:
@@ -40,3 +53,4 @@ scp: $(EXEC1)
 # Test
 test: scp
 	sshq "sudo ./$(EXEC1) /dev/sdb 8192000"
+#sshq "sudo ./$(EXEC1) /dev/sdb 8192"
