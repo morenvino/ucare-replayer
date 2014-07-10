@@ -60,3 +60,5 @@ if not os.path.exists(out_path): os.mkdir(out_path)
 os.chdir(out_path)
 with open(log_file, 'wb+') as logf:
 	log.write(logf)
+
+# generate graph

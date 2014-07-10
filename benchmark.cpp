@@ -10,6 +10,7 @@
  * ===========================================================================*/
 
 //#define _GNU_SOURCE // for C compiler
+
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -47,21 +48,16 @@ using mv::Config;
  * Types
  * ===========================================================================*/
 
-typedef struct { int f, b; void *buf; } arg_t;
-
 /* ===========================================================================
  * Functions
  * ===========================================================================*/
 
 static inline int log_nothing(const char *, ...) { return 0; }
-static void * seq_write_time(void *arg); 
-static void * rand_write_time(void *arg);
 
 /* ===========================================================================
  * Global variables
  * ===========================================================================*/
 
-auto log = printf; // log using printf by default 
 
 /* ===========================================================================
  * Main
@@ -82,7 +78,7 @@ int main(int argc, char **argv)
     auto dev           = config.get<const char *>("disk_guest");
 
     // parse arg
-    if (argc > 1) nthreads_rnd = atoi(argv[1]);
+    if (argc > 1) nthreads_rnd = atoi(argv[1]); // prioritize argv over config
 
     // validate config / arg
     if ((blocksize_rnd % MEM_ALIGN != 0) || (blocksize_seq % MEM_ALIGN != 0)) {
@@ -96,8 +92,21 @@ int main(int argc, char **argv)
 
     // initialize
     srand(time(NULL));
+    auto log = printf; // log using printf by default 
     if (not interactive) log = log_nothing;
 
+    // print configuration
+    log("blocksize_seq : %d\n", blocksize_seq);
+    log("duration_seq  : %d\n", duration_seq);
+    log("nthreads_seq  : %d\n", nthreads_seq);
+    log("blocksize_rnd : %d\n", blocksize_rnd);
+    log("duration_rnd  : %d\n", duration_rnd);
+    log("nthreads_rnd  : %d\n", nthreads_rnd);
+    log("start_delay   : %d\n", start_delay);
+    log("interactive   : %d\n", interactive);
+    log("dev           : %s\n", dev);
+
+    // prepare for direct i/o
     log("Aligning memory of %d bytes\n", blocksize_seq);
     void *buf; auto b = blocksize_seq; 
     int err = posix_memalign(&buf, MEM_ALIGN, b);
@@ -110,7 +119,7 @@ int main(int argc, char **argv)
     log("Opening device %s\n", dev);
     int f = open(dev, O_WRONLY | O_SYNC | O_DIRECT);
     if (f == -1) {
-        fprintf(stderr, "Error opening device %s\n", dev);
+        fprintf(stderr, "Error opening device '%s'\n", dev);
         return 1;   
     }
 
@@ -121,64 +130,87 @@ int main(int argc, char **argv)
         return 1;
     } 
 
-/*
-    vector<thread> threads(2);
-    for (auto& t : threads) t = thread([] { // launch threads
-        log("1\n");
-        int x = 0;
-    });   
+    // start benchmark
+    log("Starting benchmark for random write\n");
+    vector<thread> threads_rnd(nthreads_rnd);
+    for (auto& t : threads_rnd) t = thread([&] { // launch random write threads
+        uint64_t numblocks;
+        int err = ioctl(f, BLKGETSIZE, &numblocks); // get num of blocks in the disk
+        if (err) {
+            fprintf(stderr, "Error getting number of blocks\n");
+            return;       
+        }
+
+        struct timeval begin, end; double duration = 0;
+        clock_t begincpu, endcpu; double durationcpu = 0;
+
+        gettimeofday(&begin, NULL);
+        begincpu = clock(); // start timer
+
+        off64_t offset; int itercount = 0;
+        while (duration < duration_rnd) {
+            offset = (off64_t) numblocks * random() / RAND_MAX;
+            err = lseek(f, MEM_ALIGN * offset, SEEK_SET);
+            if (err == -1) {
+                fprintf(stderr, "Error seeking offset: %m\n");
+                return;       
+            }
+            err = write(f, buf, blocksize_rnd);
+            ++itercount;
+            
+            endcpu = clock(); // end timer
+            gettimeofday(&end, NULL);
+
+            durationcpu = (double)(endcpu - begincpu) / CLOCKS_PER_SEC; 
+            duration = (end.tv_sec-begin.tv_sec) + (end.tv_usec-begin.tv_usec)/1000000.0;
+        }
+        log("\nBenchmark result for random write\n");
+        log("Wrote: %d IOP\n", itercount);
+        log("Time : %0.2f s \n", duration);
+        log("Cpu  : %0.2f s \n", durationcpu);
+        log("Avg  : %0.2f IOP/s\n", itercount / duration);
+    });
     
-    for (auto& t : threads) t.join(); // wait for all threads to finish
-*/
+    sleep(start_delay); // give time for random write to start 
+    
+    log("Starting benchmark for sequential write\n");
+    vector<thread> threads_seq(nthreads_seq);
+    for (auto& t : threads_seq) t = thread([&] { // launch seq write threads
+        struct timeval begin, end; double duration = 0;
+        clock_t begincpu, endcpu; double durationcpu = 0;
+
+        gettimeofday(&begin, NULL);
+        begincpu = clock(); // start timer
         
-    /*
-    arg_t arg = {f, b, buf};    
+        int err; int itercount = 0;
+        while (duration < duration_rnd) {
+            err = write(f, buf, b);
+            if (err == -1) {
+                fprintf(stderr, "Error writing to device\n");
+                return;
+            }
+            ++itercount;
+
+            endcpu = clock(); // end timer
+            gettimeofday(&end, NULL);
+
+            durationcpu = (double)(endcpu - begincpu) / CLOCKS_PER_SEC; 
+            duration = (end.tv_sec-begin.tv_sec) + (end.tv_usec-begin.tv_usec)*1e-6;    
+        }
+        
+        log("\nBenchmark result for sequential write\n");
+        log("Wrote: %0.2f MB\n", (b * 1e-6) * itercount);
+        log("Time : %0.2f s \n", duration);
+        log("Cpu  : %0.2f s \n", durationcpu);
+        log("Avg  : %0.2f MB/s\n", ((b * 1e-6) / duration) * itercount);
+        if (not interactive) printf("%0.2f\n", ((b * 1e-6) / duration) * itercount);
+    });
     
-    pthread_t t1, t2;
-    //pthread_t threads[16];
-    //int numthreads = sizeof(threads) / sizeof(threads[0]);
-    
-    printf("Starting benchmark for sequential write\n");
-    pthread_create(&t1, NULL, seq_write_time, &arg);
-    // pthread_create(&t3, NULL, seq_write_time, &arg);
+    for (auto& t : threads_seq) t.join(); // wait for all threads to finish
+    for (auto& t : threads_rnd) t.join(); // wait for all threads to finish
 
-    //printf("Starting benchmark for random write\n");
-    // pthread_create(&t2, NULL, rand_write_time, &arg);
-    //pthread_create(&t3, NULL, rand_write_time, &arg);
-    //for (int i = 0; i < numthreads; ++i)
-    //   pthread_create(&threads[i], NULL, rand_write_time, &arg);
-
-    pthread_join(t1, NULL); 
-    // pthread_join(t2, NULL);
-    //pthread_join(t3, NULL);
-    //for (int i = 0; i < numthreads; ++i)
-     //  pthread_join(threads[i], NULL);
-
-    for (int numthreads = 1; numthreads <= 16; numthreads *= 2) {
-        pthread_t threads[numthreads];
-        //int numthreads = sizeof(threads) / sizeof(threads[0]);
-    
-        printf("Starting benchmark for random write\n");
-        // pthread_create(&t2, NULL, rand_write_time, &arg);
-        //pthread_create(&t3, NULL, rand_write_time, &arg);
-        for (int i = 0; i < numthreads; ++i)
-            pthread_create(&threads[i], NULL, rand_write_time, &arg);
-
-        sleep(1); // make sure rand_write() is started
-
-        printf("Starting benchmark for sequential write\n");
-        pthread_create(&t1, NULL, seq_write_time, &arg);
-        // pthread_create(&t3, NULL, seq_write_time, &arg);
-
-        pthread_join(t1, NULL); 
-        // pthread_join(t2, NULL);
-        //pthread_join(t3, NULL);
-        for (int i = 0; i < numthreads; ++i)
-            pthread_join(threads[i], NULL);
-    }
-    */
-
-    printf("Done\n");
+    // clean up    
+    log("Done\n");
     close(f);
     return 0;
 }
@@ -186,86 +218,3 @@ int main(int argc, char **argv)
 /* ===========================================================================
  * Functions
  * ===========================================================================*/
-
-/*
-void * seq_write_time(void *arg) 
-{
-    arg_t *args = (arg_t *)arg;
-    int f = args->f, b = args->b; void *buf = args->buf;
-
-    struct timeval begin, end; double duration = 0;
-    clock_t begincpu, endcpu; double durationcpu = 0;
-
-    gettimeofday(&begin, NULL);
-    begincpu = clock(); // start timer
-    
-    int err; int itercount = 0;
-    while (duration < DURATION) {
-        err = write(f, buf, b);
-        if (err == -1) {
-            fprintf(stderr, "Error writing to device\n");
-            return 0;
-        }
-        ++itercount;
-
-        endcpu = clock(); // end timer
-        gettimeofday(&end, NULL);
-
-        durationcpu = (double)(endcpu - begincpu) / CLOCKS_PER_SEC; 
-        duration = (end.tv_sec-begin.tv_sec) + (end.tv_usec-begin.tv_usec)*1e-6;    
-    }
-    
-    printf("\nBenchmark result for sequential write\n");
-    printf("Wrote: %0.2f MB\n", (b * 1e-6) * itercount);
-    printf("Time : %0.2f s \n", duration);
-    printf("Cpu  : %0.2f s \n", durationcpu);
-    printf("Avg  : %0.2f MB/s\n", ((b * 1e-6) / duration) * itercount);
-    return 0;
-}
-*/
-
-/*
-void * rand_write_time(void *arg) {
-    arg_t *args = (arg_t *)arg;
-    int f = args->f; void *buf = args->buf;
-
-    uint64_t numblocks;
-    int err = ioctl(f, BLKGETSIZE, &numblocks); // get num of blocks in the disk
-    if (err) {
-        fprintf(stderr, "Error getting number of blocks\n");
-        return 0;       
-    }
-
-    struct timeval begin, end; double duration = 0;
-    clock_t begincpu, endcpu; double durationcpu = 0;
-
-    gettimeofday(&begin, NULL);
-    begincpu = clock(); // start timer
-
-    off64_t offset; int itercount = 0;
-    while (duration < DURATION) {
-        offset = (off64_t) numblocks * random() / RAND_MAX;
-        err = lseek(f, MEM_ALIGN * offset, SEEK_SET);
-        if (err == -1) {
-            fprintf(stderr, "Error seeking offset: %m\n");
-            return 0;       
-        }
-        err = write(f, buf, RANDWR_SZ);
-        ++itercount;
-        
-        endcpu = clock(); // end timer
-        gettimeofday(&end, NULL);
-
-        durationcpu = (double)(endcpu - begincpu) / CLOCKS_PER_SEC; 
-        duration = (end.tv_sec-begin.tv_sec) + (end.tv_usec-begin.tv_usec)/1000000.0;
-    }
-    /*
-    printf("\nBenchmark result for random write\n");
-    printf("Wrote: %d IOP\n", itercount);
-    printf("Time : %0.2f s \n", duration);
-    printf("Cpu  : %0.2f s \n", durationcpu);
-    printf("Avg  : %0.2f IOP/s\n", itercount / duration);
-    // * /
-    return 0;
-}
-*/

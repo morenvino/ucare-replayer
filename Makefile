@@ -54,4 +54,6 @@ scp: $(EXEC1)
 # Test
 test: scp
 	sshq "sudo ./$(EXEC1)"
+	
+#sshq "sudo ./$(EXEC1) /dev/sdb 8192"
 #sshq "sudo ./$(EXEC1) /dev/sdb 8192000"
