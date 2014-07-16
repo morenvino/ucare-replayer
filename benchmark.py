@@ -83,17 +83,17 @@ for nt in nthreads:
 	print 'with', nt, 'threads of random write'
 	results[nt] = 0.0
 	for n in range(repetition):
-		throughput = sshq("sudo ./{bin} {nt}".format(bin=binary_file, nt=nt)) # TODO add number of thread
+		throughput = sshq("sudo ./{bin} {nt}".format(bin=binary_file, nt=nt))
 		throughput = float(throughput)
 		print ' throughput:', round(throughput, 2), 'MB/s'  
 		results[nt] = results[nt] + throughput
 	results[nt] = results[nt] / repetition
 	print ' average   :', round(results[nt], 2), 'MB/s' 
 
-# log result
-log.add_section('log')
-for nt, result in results.iteritems(): #zip(nthreads, results): # TODO result is not array anymore now
-	log.set('log', 't-{}'.format(nt), '{} MB/s'.format(result))
+# log result into csv
+#log.add_section('log')
+#for nt, result in results.iteritems(): #zip(nthreads, results):
+#	log.set('log', 't-{}'.format(nt), '{} MB/s'.format(result))
 
 # dump log into log_file
 out_path = 'out' #curr_time 
@@ -102,12 +102,19 @@ os.chdir(out_path)
 with open(log_file, 'wb+') as logf:
 	log.write(logf)
 
+# also log result into csv file
+with open('log.csv', 'a') as logf:
+	for nt, result in results.iteritems():
+		logf.write(str(result))
+		logf.write(',')
+	logf.write('\n')
+
 # generate graph
-plt.plot(results.keys(), results.values(), marker='.', label='unmodified')
-plt.axis([min(results.keys()), max(results.keys()), 0.0, 100.0])
-plt.grid(True)
-plt.legend()
-plt.xlabel('number of random write threads')
-plt.ylabel('sequential write throughput (MB/s)')
-plt.title('I/O throughtput')
-plt.savefig('graph.png')
+# plt.plot(results.keys(), results.values(), marker='.', label='unmodified')
+# plt.axis([min(results.keys()), max(results.keys()), 0.0, 100.0])
+# plt.grid(True)
+# plt.legend()
+# plt.xlabel('number of random write threads')
+# plt.ylabel('sequential write throughput (MB/s)')
+# plt.title('I/O throughtput')
+# plt.savefig('graph.png')
