@@ -95,8 +95,8 @@ int main(int argc, char *argv[]) {
 	printf("Allocating buffer\n");
 	void *buf; 
 	if (posix_memalign(&buf, MEM_ALIGN, LARGEST_REQUEST_SIZE * BYTE_PER_BLOCK)) {
-			fprintf(stderr, "Error allocating buffer\n");
-			return 1;
+		fprintf(stderr, "Error allocating buffer\n");
+		return 1;
 	}
 	//memset(buf, rand() % 256, LARGEST_REQUEST_SIZE * BYTE_PER_BLOCK);
 
@@ -159,26 +159,26 @@ int main(int argc, char *argv[]) {
 
 static inline void 
 performIo(int fd, void *buf, TraceEvent const& io, Logger &logger) {
-		off64_t start_offset = (off64_t)io.blkno * BYTE_PER_BLOCK; 
-		off64_t current_offset = start_offset;
-		lseek64(fd, start_offset, SEEK_SET);
+	off64_t start_offset = (off64_t)io.blkno * BYTE_PER_BLOCK; 
+	off64_t current_offset = start_offset;
+	lseek64(fd, start_offset, SEEK_SET);
 
-		int ret = 0; size_t total_size = io.size;
-		Timer timer;
-		while (total_size > 0) {
-			if (io.flags == 0)
-				ret = write(fd, buf, total_size);
-			else if (io.flags == 1)
-				ret = read(fd, buf, total_size);
-			
-			if (ret >= 0) {
-				total_size -= ret;
-				current_offset += ret;
-			} else {
-				fprintf(stderr, "Error performing i/o: %m\n");
-			}
+	int ret = 0; size_t total_size = io.size;
+	Timer timer;
+	while (total_size > 0) {
+		if (io.flags == 0)
+			ret = write(fd, buf, total_size);
+		else if (io.flags == 1)
+			ret = read(fd, buf, total_size);
+		
+		if (ret >= 0) {
+			total_size -= ret;
+			current_offset += ret;
+		} else {
+			fprintf(stderr, "Error performing i/o: %m\n");
 		}
-		long latency = timer.elapsedTime();
-		logger.printf("%ld,%d,%ld,%lf\n", 
-			(size_t)io.time, io.bcount, latency, (double)io.size/latency);
+	}
+	long latency = timer.elapsedTime();
+	logger.printf("%ld,%d,%ld,%lf\n", 
+		(size_t)io.time, io.bcount, latency, (double)io.size/latency);
 }
