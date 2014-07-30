@@ -43,7 +43,7 @@ public:
 	/** Read trace. */
 	inline bool read(TraceEvent& event) {
 		return fscanf(input, "%lf %*d %ld %ld %d", 
-		 	&event.time, &event.blkno, &event.bcount, &event.flags) == 4;
+			&event.time, &event.blkno, &event.bcount, &event.flags) == 4;
 	}
 
 private:

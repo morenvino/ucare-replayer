@@ -32,11 +32,11 @@ public:
 		std::string line;
 		while (getline(in, line)) {
 			std::istringstream is(line);
-		  std::string key, value;
-  		getline(is, key, '=');
-    	getline(is, value, ' ');
-      config[key] = value;
-  	}
+			std::string key, value;
+			getline(is, key, '=');
+			getline(is, value, ' ');
+			config[key] = value;
+		}
 	}
 
 	/** @return a value of key as type T. */
