@@ -82,7 +82,7 @@ int main(int argc, char *argv[]) {
 	printf("trace     : %s\n", traceFile);
 	printf("nthreads  : %d\n", nthreads);
 	printf("device    : %s\n", device);
-	printf("log       : %s\n", logDir);
+	printf("log       : %s\n", logDir.c_str());
 	printf("precision : %fms\n", Timer::getResolution());
 
 	printf("Opening device %s\n", device);
