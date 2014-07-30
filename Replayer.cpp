@@ -1,6 +1,6 @@
 /** 
- * @author morenvino@uchicago.edu
- * @file   SNIA trace replayer adapted from tiratatp@uchicago.edu
+ * @author morenvino@xxxxxxxx.xxx
+ * @file   SNIA trace replayer adapted from tiratatp@xxxxxxxx.xxx
  */
 
 /* ===========================================================================

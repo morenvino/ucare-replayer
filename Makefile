@@ -1,4 +1,4 @@
-# morenvino@uchicago.edu
+# morenvino@xxxxxxxx.xxx
 
 # Workspace
 CSOURCES   = $(wildcard *.c)

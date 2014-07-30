@@ -1,4 +1,4 @@
-/** @author morenvino@uchicago.edu */
+/** @author morenvino@xxxxxxxx.xxx */
 
 #ifndef UCARE_SPIN_MUTEX_H
 #define UCARE_SPIN_MUTEX_H

@@ -1,4 +1,4 @@
-/** @author morenvino@uchicago.edu */
+/** @author morenvino@xxxxxxxx.xxx */
 
 #ifndef UCARE_CONCURRENT_QUEUE_H
 #define UCARE_CONCURRENT_QUEUE_H

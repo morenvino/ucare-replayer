@@ -1,4 +1,4 @@
-/** @author morenvino@uchicago.edu */
+/** @author morenvino@xxxxxxxx.xxx */
 
 #ifndef UCARE_TRACE_READER_H	
 #define UCARE_TRACE_READER_H	
