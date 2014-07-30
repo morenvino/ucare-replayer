@@ -49,6 +49,11 @@ using namespace ucare;
 #define BYTE_PER_BLOCK        512  // Number of bytes per I/O block
 #define LARGEST_REQUEST_SIZE 8192  // Largest request size in blocks
 
+#define DEFAULT_NTHREADS       32
+#define DEFAULT_DEVICE         "/dev/sdb"
+#define DEFAULT_TRACE_FILE     "in.trace"
+#define DEFAULT_LOG_DIR        "./"
+
 /* ===========================================================================
  * Function
  * ===========================================================================*/
@@ -75,6 +80,11 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Error trying to write to system partition %s\n", device);
 		return 1;
 	}
+	// use default value if not supplied
+	if (strcmp(device, "") == 0) device = DEFAULT_DEVICE;
+	if (strcmp(traceFile, "") == 0) traceFile = DEFAULT_TRACE_FILE;
+	if (strcmp(logDir.c_str(), "") == 0) logDir = DEFAULT_LOG_DIR;
+	if (nthreads == 0) nthreads = DEFAULT_NTHREADS;
 	
 	srand(time(NULL)); 	// initialize seed
 
