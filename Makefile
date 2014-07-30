@@ -48,7 +48,7 @@ clean:
 
 # Scp to Qemu
 scp: $(EXEC1)
-	scpq ../timing -r
+	scpq ../replayer -r
 
 # Test
 test:

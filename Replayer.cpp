@@ -113,8 +113,8 @@ int main(int argc, char *argv[]) {
 			event.size = event.bcount * BYTE_PER_BLOCK;
 			queue.push(event);
 		}
-		readDone = true; // might want to use atomic to be 100% correct?
-		// notify  
+		readDone = true; 
+		queue.notifyAll(); // notify worker we're done  
 	});	
 	queue.waitUntilFull(); // wait until at least queue's full
 

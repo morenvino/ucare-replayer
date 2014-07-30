@@ -68,6 +68,9 @@ public:
 		while (!full()) notEmpty.wait(lock);
 	}
 
+	/** Wakeup all waiting thread. */
+	void notifyAll() { notEmpty.notify_all(); }
+
 //private: 
 	const size_t max;
 	std::deque<T> queue;
