@@ -7,7 +7,7 @@ COBJECTS   = $(notdir $(CSOURCES:.c=.o))
 CXXSOURCES = $(wildcard *.cpp)
 CXXOBJECTS = $(notdir $(CXXSOURCES:.cpp=.o))
 
-EXEC1   = main.out
+EXEC1   = replayer.out
 
 # Build options
 CC        = gcc
