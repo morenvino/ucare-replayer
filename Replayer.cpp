@@ -12,7 +12,6 @@
 #include <iostream>
 #include <vector>
 #include <thread>
-#include <memory>
 #include <chrono>
 #include <atomic>
 #include <string>
@@ -20,13 +19,9 @@
 #include <cstdio> 
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
-#include <cstdint>
-#include <climits>
 
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/time.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 
@@ -35,7 +30,6 @@
 #include "ConcurrentQueue.h"
 #include "Timer.h"
 #include "Logger.h"
-//#include "Object.h"
 
 using namespace std;
 using namespace chrono;
@@ -49,10 +43,10 @@ using namespace ucare;
 #define BYTE_PER_BLOCK        512  // Number of bytes per I/O block
 #define LARGEST_REQUEST_SIZE 8192  // Largest request size in blocks
 
-#define DEFAULT_NTHREADS       32
-#define DEFAULT_DEVICE         "/dev/sdb"
-#define DEFAULT_TRACE_FILE     "in.trace"
-#define DEFAULT_LOG_DIR        "./"
+#define DEFAULT_NTHREADS      256
+#define DEFAULT_DEVICE       "/dev/sdb"
+#define DEFAULT_TRACE_FILE   "in.trace"
+#define DEFAULT_LOG_DIR      "./"
 
 /* ===========================================================================
  * Function
@@ -139,7 +133,7 @@ int main(int argc, char *argv[]) {
 		Timer timer; // mark the beginning of worker thread	
 		while (!readDone or !queue.empty()) { 
 			TraceEvent event;
-			if (not queue.pop(event)) break; // retry 
+			if (not queue.pop(event)) continue; // retry 
 			long currentTime = timer.elapsedTime(), nextIoTime = event.time;
 			if (currentTime <= nextIoTime) { // we're early/on-time
 				//printf(". next=%ld current=%ld \n", nextIoTime, currentTime);
@@ -171,15 +165,17 @@ static inline void
 performIo(int fd, void *buf, TraceEvent const& io, Logger &logger) {
 	off64_t start_offset = (off64_t)io.blkno * BYTE_PER_BLOCK; 
 	off64_t current_offset = start_offset;
-	lseek64(fd, start_offset, SEEK_SET);
+	//lseek64(fd, start_offset, SEEK_SET);
 
 	int ret = 0; size_t total_size = io.size;
 	Timer timer;
 	while (total_size > 0) {
 		if (io.flags == 0)
-			ret = write(fd, buf, total_size);
+			//ret = write(fd, buf, total_size);
+			ret = pwrite(fd, buf, total_size, current_offset);
 		else if (io.flags == 1)
-			ret = read(fd, buf, total_size);
+			//ret = read(fd, buf, total_size);
+			ret = pread(fd, buf, total_size, current_offset);
 		
 		if (ret >= 0) {
 			total_size -= ret;
@@ -189,6 +185,6 @@ performIo(int fd, void *buf, TraceEvent const& io, Logger &logger) {
 		}
 	}
 	long latency = timer.elapsedTime();
-	logger.printf("%ld,%d,%ld,%lf\n", 
+	logger.printf("%ld,%ld,%ld,%lf\n", 
 		(size_t)io.time, io.bcount, latency, (double)io.size/latency);
 }
