@@ -24,8 +24,18 @@ class Config {
 	constexpr static const char * DEFAULT_CONFIG_FILE = "config.ini";
 
 public:
-	/** Read config. */
+	/** Create config from file. */
 	Config(const char *filename = DEFAULT_CONFIG_FILE) {
+		read(filename);
+	}
+
+	/** Create config from argv. */
+	Config(int argc, char* argv[]) {
+		read(argc, argv);
+	}
+
+	/** Read config from file. */
+	void read(const char *filename) {
 		using std::getline;
 		
 		std::ifstream in(filename);
@@ -36,13 +46,21 @@ public:
 			getline(is, key, '=');
 			getline(is, value, ' ');
 			config[key] = value;
-		}
+		}	
 	}
+
+	/** Read config from argv. */
+	void read(int argc, char* argv[]) {
+		for (int i = 2; i < argc; i += 2) { // argv have to be key-value pairs
+			std::string key = argv[i-1], value = argv[i];
+			config[key] = value;
+		}
+	}	
 
 	/** @return a value of key as type T. */
 	template<typename T = const char *> 
 	inline T get(const char *key) {
-			return config[key].c_str();
+		return config[key].c_str();
 	}
 
 private:
