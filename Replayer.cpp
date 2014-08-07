@@ -153,6 +153,8 @@ int main(int argc, char *argv[]) {
 	for (auto& t : workers) t.join(); 
 
 	printf("Late count: %d\n", lateCount.load());
+	Logger logger(logDir + traceFile + to_string(0));
+	logger.printf("%d\n", lateCount.load());
 	printf("Done\n");
 	return 0;
 }
@@ -185,6 +187,6 @@ performIo(int fd, void *buf, TraceEvent const& io, Logger &logger) {
 		}
 	}
 	long latency = timer.elapsedTime();
-	logger.printf("%ld,%ld,%ld,%lf\n", 
-		(size_t)io.time, io.bcount, latency, (double)io.size/latency);
+	logger.printf("%ld,%ld,%ld,%d,%ld,%lf\n", 
+		(size_t)io.time, io.blkno, io.bcount, io.flags, latency, (double)io.size/latency);
 }
