@@ -43,6 +43,11 @@ public:
 		va_end(args);	 
 	}
 
+	/** Cast to FILE*. */
+	operator FILE* () {
+		return file;
+	}
+
 private:
 	FILE *file; /// Log file
 }; // class Logger

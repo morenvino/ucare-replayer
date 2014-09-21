@@ -19,9 +19,10 @@ namespace ucare {
 /** An I/O trace event. */
 struct TraceEvent {
 	double time;
-	size_t bcount;
-	size_t size;
-	size_t blkno;
+	size_t bcount; // count in block
+	size_t size; // count in bytes
+	size_t blkno; // offset in block
+	size_t offset; // offset in bytes
 	int    flags;
 }; // struct TraceEvent
 

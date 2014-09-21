@@ -52,6 +52,11 @@ public:
 	/** @return the current point in time. */
 	static inline Timepoint now() { return Clock::now(); }
 
+	/** @return the elapsed duration since the given time. */
+	template <typename Duration = std::chrono::microseconds>
+	static inline long elapsedTimeSince(Timepoint begin) {
+		return std::chrono::duration_cast<Duration>(now() - begin).count();
+	}
 
 /* ===========================================================================
  * Method
