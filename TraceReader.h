@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <stdexcept>
+#include <cstdlib>
 
 namespace ucare {
 
@@ -61,7 +62,7 @@ public:
           event.bcount = strtol(tok, NULL, 10);
           break;
         case 4:
-          event.flags = strtol(tok, NULL); // this is just integer
+          event.flags = strtol(tok, NULL, 10); // this is just integer
           break;
         default:
           // ignored
