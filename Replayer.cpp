@@ -25,6 +25,7 @@
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 #include <aio.h>
+#include <pthread.h>
 
 #include "Config.h"
 #include "TraceReader.h"
@@ -50,25 +51,19 @@ using namespace ucare;
 #define DEFAULT_LOG_DIR      "./"
 
 /* ===========================================================================
- * Type
+ * Global variables
  * ===========================================================================*/
 
-// Add IoEvent into aiocb
-struct AioCB /*: public aiocb*/ {
-	aiocb cb; 
-	TraceEvent event; // Io Event
-	Timer::Timepoint beginTime; // Time right before we submit the IO
-	Logger *log; // Reference to shared log 
-}; // struct AioCB
-
+Logger logger; // global log
+int submitCount = 0; // count IO submitted
+atomic<int> completeCount(0); // count IO completed
 
 /* ===========================================================================
  * Function
  * ===========================================================================*/
 
 // Perform IO in async manner
-static inline void 
-performIoAsync(int fd, void *buf, TraceEvent const& io, Logger& logger);
+static inline void performIoAsync(int fd, void *buf, TraceEvent const& io);
 
 // Callback when IO's completed
 static void onIoCompleted(sigval_t sigval);
@@ -80,14 +75,14 @@ static void onIoCompleted(sigval_t sigval);
 int main(int argc, char *argv[]) {
 	// read config.ini file
 	Config config;
-	auto nthreads  = config.get<int>("nthreads");
+	//auto nthreads  = config.get<int>("nthreads");
 	auto device    = config.get<const char *>("disk_guest");
 	auto traceFile = config.get<const char *>("trace_file");
 	auto logDir    = config.get<string>("log_dir");
 	
 	// parse arg, prioritize argv over config
 	if (argc > 1) traceFile = argv[1]; 
-	if (argc > 2) nthreads = atoi(argv[2]);
+	//if (argc > 2) nthreads = atoi(argv[2]);
 	if (strstr(device, "/dev/sda")) { // avoid accidentally writing to system part 
 		fprintf(stderr, "Error trying to write to system partition %s\n", device);
 		return 1;
@@ -96,13 +91,13 @@ int main(int argc, char *argv[]) {
 	if (strcmp(device, "") == 0) device = DEFAULT_DEVICE;
 	if (strcmp(traceFile, "") == 0) traceFile = DEFAULT_TRACE_FILE;
 	if (strcmp(logDir.c_str(), "") == 0) logDir = DEFAULT_LOG_DIR;
-	if (nthreads == 0) nthreads = DEFAULT_NTHREADS;
+	//if (nthreads == 0) nthreads = DEFAULT_NTHREADS;
 	
 	srand(time(NULL)); 	// initialize seed
 
 	// print configuration
 	printf("trace     : %s\n", traceFile);
-	printf("nthreads  : %d\n", nthreads);
+	//printf("nthreads  : %d\n", nthreads);
 	printf("device    : %s\n", device);
 	printf("log       : %s\n", logDir.c_str());
 	printf("precision : %fms\n", Timer::getResolution());
@@ -122,6 +117,9 @@ int main(int argc, char *argv[]) {
 	}
 	//memset(buf, rand() % 256, LARGEST_REQUEST_SIZE * BYTE_PER_BLOCK);
 
+	printf("Opening log file\n");
+	logger.redirect(logDir + traceFile + "1");
+
 	printf("Opening trace file\n");
 	TraceReader trace(traceFile); // open trace file
 	ConcurrentQueue<TraceEvent> queue; // queue of trace events
@@ -130,26 +128,21 @@ int main(int argc, char *argv[]) {
 	printf("Start reading trace\n");
 	thread fileThread([&] { // thread to read trace file 
 		TraceEvent event;
-		static int count = 0;
 		while (trace.read(event)) {
 			event.time = event.time * 1000; // to microseconds
 			event.size = event.bcount * BYTE_PER_BLOCK;
 			event.offset = event.blkno * BYTE_PER_BLOCK;
 			queue.push(event);
-
-			if (count++ == 10) break;
 		}
 		readDone = true;
 		queue.notifyAll();
 		Timer::delay<seconds>(1); 
 		queue.notifyAll(); // notify worker we're done  
 	});	
-	//queue.waitUntilFull(); // wait until at least queue's full
+	queue.waitUntilFull(); // wait until at least queue's full
 
 	printf("Start replaying trace\n");
 	thread timerThread([&] {
-		Logger logger(logDir + traceFile + "1");
-		
 		Timer timer; // mark the beginning 
 		while (!readDone or !queue.empty()) { 
 			TraceEvent event;
@@ -160,7 +153,7 @@ int main(int argc, char *argv[]) {
 				currentTime = timer.elapsedTime(); // busy-waiting
 			}
 
-			performIoAsync(fd, buf, event, logger);
+			performIoAsync(fd, buf, event);
 		}
 	});
 
@@ -168,61 +161,73 @@ int main(int argc, char *argv[]) {
 	fileThread.join(); // wait for all threads to finish
 	timerThread.join(); 
 
-	//printf("Late count: %d\n", lateCount.load());
-	//Logger logger(logDir + traceFile + to_string(0));
-	//logger.printf("%d\n", lateCount.load());
+	// wait for all the callbacks to finish
+	static int numWait = 0;
+	while (completeCount != submitCount && numWait++ < 180)
+		sleep(1);
+	if (completeCount != submitCount)
+		fprintf(stderr, "Warning I/O completed:%d but submitted:%d\n", 
+			completeCount.load(), submitCount);
+
 	printf("Done\n");
 	return 0;
 }
+
+
+/* ===========================================================================
+ * Internal Type
+ * ===========================================================================*/
+
+// Add our objects into aiocb
+struct AioCB : public aiocb {
+	TraceEvent event; // The IoEvent performed for this callback
+	Timer::Timepoint beginTime; // The time right before we submit the IO
+}; // struct AioCB
+
 
 /* ===========================================================================
  * Function
  * ===========================================================================*/
 
-static inline void 
-performIoAsync(int fd, void *buf, TraceEvent const& io, Logger &logger) {
-	auto our =  new AioCB; // keep cb alive till callback's done
-	//auto cb =  (aiocb*)malloc(sizeof(Aiocb)); // keep cb alive till callback's done
-	aiocb *cb = &our->cb;
-
+// Perform IO in async manner
+static inline void performIoAsync(int fd, void *buf, TraceEvent const& io) {
+	// create and initialize cb with 0! 
+	auto cb = new AioCB(); // keep cb alive till callback's done!
+	
 	cb->aio_fildes = fd;
 	cb->aio_buf = buf;
-	//cb->aio_nbytes = io.size;
-	cb->aio_nbytes = 512;
-	//cb->aio_offset = io.offset;
-	cb->aio_offset = 0;
+	cb->aio_nbytes = io.size;
+	cb->aio_offset = io.offset;
 
 	cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
 	cb->aio_sigevent.sigev_notify_function = onIoCompleted;
 	cb->aio_sigevent.sigev_value.sival_ptr = cb;
 
-	our->event = io;	
-	our->log = &logger; 
-	our->beginTime = Timer::now();
+	cb->event = io;	
+	cb->beginTime = Timer::now(); // mark the time right before we submit IO
 	
+	// submit IO
 	int error = 0;
-	if (io.flags == 0)
+	if (io.flags == 0) // output
 		error = aio_write(cb);
-	else if (io.flags == 1)
+	else if (io.flags == 1) // input
 		error = aio_read(cb);
 
 	if (error) {
-		fprintf(stderr, "Error performing i/o: %m when size:%ld offset:%ld\n", 
-			cb->aio_nbytes, cb->aio_offset);
+		fprintf(stderr, "Error performing i/o: %m time:%ld size:%ld offset:%ld\n", 
+			(size_t)io.time, cb->aio_nbytes, cb->aio_offset);
+		return;
 	}
-	else
-		printf("not error \n"); 
 
-	fprintf(stderr, "%ld,%ld,%ld,%d\n", 
-		(size_t)io.time, io.blkno, io.bcount, io.flags);
-
+	++submitCount; // keep track number of request submitted
 }
 
+// Callback when IO's completed
 static void onIoCompleted(sigval_t sigval) {
-	printf("onIoCompleted\n");
-	auto request = (aiocb *)sigval.sival_ptr;
-	auto our = (AioCB *)sigval.sival_ptr;
-	long latency = Timer::elapsedTimeSince(our->beginTime); 
+	auto request = (AioCB *)sigval.sival_ptr;
+	long latency = Timer::elapsedTimeSince(request->beginTime); // time completed
+
+	++completeCount; // keep track number of request completed
 	
 	int error = aio_error(request);
 	if (error) {
@@ -233,14 +238,20 @@ static void onIoCompleted(sigval_t sigval) {
 	
 	int count = aio_return(request);
 	if (count < (int)request->aio_nbytes) { // does this happen with device? 
-		fprintf(stderr, "Warning I/O completed:%d but requested:%ld\n", 
+		fprintf(stderr, "Warning I/O completed:%db but requested:%ldb\n", 
 			count, request->aio_nbytes);
 		// TODO: submit the remaining io
+		// never happen so far ...
 	}
 
-	//TraceEvent& io = our->event;
-	//fprintf(*our->log, "%ld,%ld,%ld,%d,%ld,%lf\n", 
-	//	(size_t)io.time, io.blkno, io.bcount, io.flags, latency, (double)io.size/latency);
+	// log result (note: we can use shared log now because the IO's done)
+	TraceEvent const& io = request->event;
+	fprintf(logger, "%ld,%ld,%ld,%d,%ld,%lf\n", 
+		(size_t)io.time, io.blkno, io.bcount, io.flags, latency, (double)io.size/latency);
+
+	// print simple progress
+	static int progress = 0;
+	if (progress++ % 1024 == 0) printf(".\n");
 
 	delete request;
 }
