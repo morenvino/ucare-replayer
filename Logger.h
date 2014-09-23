@@ -21,8 +21,17 @@ namespace ucare {
 /** A simple logger. */
 class Logger {
 public:
-	/** Open log. */
-	Logger(std::string filename) {
+	/** Open log to stdout. */
+	Logger() : file(stdout) {}
+
+	/** Open log to the given file. */
+	Logger(std::string filename) : file(NULL) {}
+
+	/** Redirect log to the given file. */
+	void redirect(std::string filename) {
+		if (file != stdout)
+			fclose(file); // close previous file
+
 		file = fopen(filename.c_str(), "w");
 		if (file == NULL) {
 			fprintf(stderr, "error: opening file %s: %m!\n", filename.c_str());
