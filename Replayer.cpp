@@ -51,19 +51,33 @@ using namespace ucare;
 #define DEFAULT_LOG_DIR      "./"
 
 /* ===========================================================================
+ * Type
+ * ===========================================================================*/
+
+// Add our objects into aiocb
+struct AioCB : public aiocb {
+	TraceEvent event; // The IoEvent performed for this callback
+	Timer::Timepoint beginTime; // The time right before we submit the IO
+}; // struct AioCB
+
+/* ===========================================================================
  * Global variables
  * ===========================================================================*/
 
-Logger logger; // global log
-int submitCount = 0; // count IO submitted
-atomic<int> completeCount(0); // count IO completed
+static Logger logger; // global log
+static int submitCount = 0; // count IO submitted
+static atomic<int> completeCount(0); // count IO completed
+
+#include <set>
+static set<pthread_t> cbtracker;
+
 
 /* ===========================================================================
  * Function
  * ===========================================================================*/
 
 // Perform IO in async manner
-static inline void performIoAsync(int fd, void *buf, TraceEvent const& io);
+static inline AioCB * performIoAsync(int fd, void *buf, TraceEvent const& io);
 
 // Callback when IO's completed
 static void onIoCompleted(sigval_t sigval);
@@ -124,6 +138,13 @@ int main(int argc, char *argv[]) {
 	TraceReader trace(traceFile); // open trace file
 	ConcurrentQueue<TraceEvent> queue; // queue of trace events
 	bool readDone = false; // whether or not we're done reading trace file
+
+	printf("Tuning AIO parameter\n");
+	aioinit aioParam = {0};
+	aioParam.aio_threads = 20;
+	aioParam.aio_num = 2048;
+	aioParam.aio_idle_time = 1;	
+	aio_init(&aioParam);
 	
 	printf("Start reading trace\n");
 	thread fileThread([&] { // thread to read trace file 
@@ -142,6 +163,11 @@ int main(int argc, char *argv[]) {
 	queue.waitUntilFull(); // wait until at least queue's full
 
 	printf("Start replaying trace\n");
+	printf("sizeof(AioCB): %ld\n", sizeof(AioCB));
+	printf("total(AioCB) : %ld\n", sizeof(AioCB) * 280672);
+
+	Timer timeBegin;
+	vector<AioCB *> cbs;
 	thread timerThread([&] {
 		Timer timer; // mark the beginning 
 		while (!readDone or !queue.empty()) { 
@@ -153,44 +179,61 @@ int main(int argc, char *argv[]) {
 				currentTime = timer.elapsedTime(); // busy-waiting
 			}
 
-			performIoAsync(fd, buf, event);
+			AioCB *cb = performIoAsync(fd, buf, event);
+			cbs.push_back(cb);
 		}
 	});
 
+	int dropCount = 0;
+	thread monitorThread([&] {
+		//while (cbs.size() != 0) {
+		while ( 1 /*completeCount != 20000*/) {
+			for (auto cb : cbs) {
+				if (aio_error(cb) == EINPROGRESS and 
+					Timer::elapsedTimeSince<seconds>(cb->beginTime) > 10) {
+					// cancel request that is still pending after 10 seconds
+					aio_cancel(cb->aio_fildes, cb);
+					++dropCount;
+				}
+			}
+			// TODO: remove and delete cancelled and completed cb
+			// need to add mutex for thread safe ...
+			Timer::delay<seconds>(1);
+		}
+	});
 
 	fileThread.join(); // wait for all threads to finish
 	timerThread.join(); 
+	monitorThread.detach();
+
+	printf("All IO submitted after: %ld s\n", timeBegin.elapsedTime<seconds>());	
+	//Timer timeDone;
 
 	// wait for all the callbacks to finish
-	static int numWait = 0;
-	while (completeCount != submitCount && numWait++ < 180)
-		sleep(1);
+	//static int numWait = 0;
+	while (completeCount != submitCount /*&& numWait++ < 300*/) {
+		printf("I/O completed:%d but submitted:%d\n", 
+			completeCount.load(), submitCount);
+		sleep(5);
+	}
 	if (completeCount != submitCount)
 		fprintf(stderr, "Warning I/O completed:%d but submitted:%d\n", 
 			completeCount.load(), submitCount);
 
+	printf("All IO completed after: %ld s\n", timeBegin.elapsedTime<seconds>());
+	printf("Drop count: %d\n", dropCount);
+	printf("Number of callback thread: %ld\n", cbtracker.size());
+
 	printf("Done\n");
 	return 0;
 }
-
-
-/* ===========================================================================
- * Internal Type
- * ===========================================================================*/
-
-// Add our objects into aiocb
-struct AioCB : public aiocb {
-	TraceEvent event; // The IoEvent performed for this callback
-	Timer::Timepoint beginTime; // The time right before we submit the IO
-}; // struct AioCB
-
 
 /* ===========================================================================
  * Function
  * ===========================================================================*/
 
 // Perform IO in async manner
-static inline void performIoAsync(int fd, void *buf, TraceEvent const& io) {
+static inline AioCB * performIoAsync(int fd, void *buf, TraceEvent const& io) {
 	// create and initialize cb with 0! 
 	auto cb = new AioCB(); // keep cb alive till callback's done!
 	
@@ -216,14 +259,18 @@ static inline void performIoAsync(int fd, void *buf, TraceEvent const& io) {
 	if (error) {
 		fprintf(stderr, "Error performing i/o: %m time:%ld size:%ld offset:%ld\n", 
 			(size_t)io.time, cb->aio_nbytes, cb->aio_offset);
-		return;
+		return NULL;
 	}
 
 	++submitCount; // keep track number of request submitted
+
+	return cb;
 }
 
 // Callback when IO's completed
 static void onIoCompleted(sigval_t sigval) {
+	cbtracker.insert(pthread_self());
+
 	auto request = (AioCB *)sigval.sival_ptr;
 	long latency = Timer::elapsedTimeSince(request->beginTime); // time completed
 
@@ -231,8 +278,9 @@ static void onIoCompleted(sigval_t sigval) {
 	
 	int error = aio_error(request);
 	if (error) {
-		fprintf(stderr, "Error completing i/o:%d\n", error);
-		delete request;
+		if(error != ECANCELED)
+			fprintf(stderr, "Error completing i/o:%d\n", error);
+		//delete request;
 		return;
 	}
 	
@@ -251,7 +299,12 @@ static void onIoCompleted(sigval_t sigval) {
 
 	// print simple progress
 	static int progress = 0;
-	if (progress++ % 1024 == 0) printf(".\n");
+	if (progress++ % 1024 == 0) { 
+		printf(".\n");
+		//fprintf(logger, "%ld,%ld,%ld,%d,%ld,%lf\n", 
+		//	(size_t)io.time, io.blkno, io.bcount, io.flags, latency, (double)io.size/latency);
+	}
 
-	delete request;
+	// let monitor thread delete the request now
+	// delete request;
 }
