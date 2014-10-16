@@ -1,31 +1,31 @@
 #!/bin/bash -x
 
 #mode="shelter"
-mode="default"
+mode="b15m0d"
 #traces="DAP-PS"
 #traces="DAP-PS RAD-BE DTRS"
 #traces="RAD-BE-10000 DAP-PS-10000 DTRS-10000"
-traces="RAD-BE-180s DAP-PS-180s DTRS-180s"
-nthreads=200
+traces="RAD-BE DTRS"
+nthreads=8
 logdir=/log
-outdir=.
+outdir=/home/morenvino/replayer-log
 
 sudo hdparm -W0 /dev/sdb
 for trace in $traces
 do
-	tracefile="$trace.trace"
-	i=5 # 5: hdparm -W0
-
+	tracefile="$trace-$mode.trace"
+	i=210 
 	
 	# run replayer
-	sudo ./replayer.out $tracefile $nthreads
+	sudo ./replayer.out $tracefile 
 	sync
-	sleep 5
+	sleep 10
 
 	# collect log
 	#logdir=$trace-$mode-$i 
 	#mkdir $logdir
-	outlog=$trace-$mode-$i
+	outlog=$trace-$mode-bare-$i
 	cat $logdir/* | sort -n >> $outdir/$outlog.log
 	sudo rm $logdir/*
 done
+
