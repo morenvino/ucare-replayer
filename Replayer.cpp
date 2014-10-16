@@ -125,7 +125,6 @@ int main(int argc, char *argv[]) {
 	//queue.waitUntilFull(); // wait until at least queue's full
 	sleep(3);
 
-
 	printf("Start replaying trace\n");
 	Timer timeBegin;
 	vector<thread> workers(nthreads); // generate worker threads
@@ -136,7 +135,6 @@ int main(int argc, char *argv[]) {
 		//int myLateCount = 0; // local lateCount for this thread 
 		Logger logger(logDir + traceFile + to_string(myId));
 		
-		Timer timer; // mark the beginning of worker thread	
 		while (!readDone or !queue.empty()) { 
 			TraceEvent event;
 			if (not queue.pop(event)) continue; // retry 
