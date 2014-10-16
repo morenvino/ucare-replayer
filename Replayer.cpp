@@ -118,43 +118,42 @@ int main(int argc, char *argv[]) {
 			queue.push(event);
 		}
 		readDone = true; 
+		queue.notifyAll();
+		Timer::delay<seconds>(1);  
 		queue.notifyAll(); // notify worker we're done  
 	});	
-	queue.waitUntilFull(); // wait until at least queue's full
+	//queue.waitUntilFull(); // wait until at least queue's full
+	sleep(3);
+
 
 	printf("Start replaying trace\n");
+	Timer timeBegin;
 	vector<thread> workers(nthreads); // generate worker threads
-	atomic<int> lateCount(0), threadId(0); // late I/O count and threadId
+	//atomic<int> lateCount(0), threadId(0); // late I/O count and threadId
+	atomic<int> threadId(0); // late I/O count and threadId
 	for (auto& t : workers) t = thread([&] { // launch workers 
 		int myId = ++threadId; // id for this thread
-		int myLateCount = 0; // local lateCount for this thread 
+		//int myLateCount = 0; // local lateCount for this thread 
 		Logger logger(logDir + traceFile + to_string(myId));
 		
 		Timer timer; // mark the beginning of worker thread	
 		while (!readDone or !queue.empty()) { 
 			TraceEvent event;
 			if (not queue.pop(event)) continue; // retry 
-			long currentTime = timer.elapsedTime(), nextIoTime = event.time;
-			if (currentTime <= nextIoTime) { // we're early/on-time
-				//printf(". next=%ld current=%ld \n", nextIoTime, currentTime);
-				Timer::delay(nextIoTime - currentTime); // delay until ~specified time
-			} else { // we're late
-				//printf("x next=%ld current=%ld delta=%ld\n", 
-				// nextIoTime, currentTime, currentTime-nextIoTime);
-				++myLateCount;
-			}
 			
 			performIo(fd, buf, event, logger);
 		}
-		lateCount += myLateCount; // update global lateCount
+		//lateCount += myLateCount; // update global lateCount
 	});
 
 	fileThread.join(); // wait for all threads to finish
 	for (auto& t : workers) t.join(); 
 
-	printf("Late count: %d\n", lateCount.load());
-	Logger logger(logDir + traceFile + to_string(0));
-	logger.printf("%d\n", lateCount.load());
+	//printf("Late count: %d\n", lateCount.load());
+	//Logger logger(logDir + traceFile + to_string(0));
+	//logger.printf("%d\n", lateCount.load());
+	printf("All IO completed after: %ld s\n", timeBegin.elapsedTime<seconds>());
+
 	printf("Done\n");
 	return 0;
 }
